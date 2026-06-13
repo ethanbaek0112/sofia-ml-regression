@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sofia ML Regression 2026 Spring — Baek Seunghan</title>
+<style>
+  @page { size: 1280px 720px; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; }
+  .slide {
+    width: 1280px; height: 720px; padding: 54px 64px;
+    page-break-after: always; position: relative;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .slide:last-child { page-break-after: auto; }
+  h1 { font-size: 40px; color: #14264a; margin-bottom: 6px; }
+  h2 { font-size: 30px; color: #14264a; border-bottom: 3px solid #2e5cb8;
+       padding-bottom: 8px; margin-bottom: 20px; }
+  .sub { font-size: 18px; color: #555; margin-bottom: 4px; }
+  ul { margin-left: 22px; }
+  li { font-size: 19px; line-height: 1.55; margin-bottom: 8px; }
+  li ul { margin-top: 6px; }
+  li li { font-size: 17px; margin-bottom: 4px; }
+  b, strong { color: #14264a; }
+  table { border-collapse: collapse; margin: 14px 0; font-size: 16px; }
+  th, td { border: 1px solid #c4c4c4; padding: 6px 12px; text-align: left; }
+  th { background: #14264a; color: #fff; }
+  tr.hl td { background: #fff4d6; font-weight: bold; }
+  .foot { position: absolute; bottom: 22px; right: 64px; font-size: 13px; color: #999; }
+  .two { display: flex; gap: 36px; flex: 1; }
+  .col { flex: 1; }
+  .plot { text-align: center; margin: 10px 0; }
+  .plot img { max-height: 300px; border: 1px solid #ddd; }
+  .tldr { background: #f5f7fb; border-left: 5px solid #2e5cb8; padding: 16px 22px; margin-top: 14px; }
+  .big { font-size: 22px; }
+  .center { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; text-align: center; }
+  .note { font-size: 16px; color: #444; font-style: italic; }
+  code { background: #eee; padding: 1px 5px; border-radius: 3px; font-size: 16px; }
+  a { color: #2e5cb8; }
+</style>
+</head>
+<body>
+
+<!-- SLIDE 1 -->
+<div class="slide">
+  <div class="center">
+    <h1 style="font-size:48px;">Sofia ML Regression 2026 Spring</h1>
+    <p class="sub big">Baek Seunghan</p>
+    <p class="sub">Kaggle: <a href="https://www.kaggle.com/baek007">https://www.kaggle.com/baek007</a></p>
+    <div class="tldr" style="text-align:left; max-width:980px;">
+      <p class="big" style="margin-bottom:10px;"><strong>TL;DR</strong></p>
+      <ul>
+        <li><strong>Problem:</strong> 15 anonymized features &rarr; one real-valued target, scored by R&sup2;. Very weak signal, extreme outliers.</li>
+        <li><strong>Main idea:</strong> don't fight outliers with a fancier model &mdash; clean the <em>training</em> target (winsorize) and keep a simple Ridge.</li>
+        <li><strong>Result:</strong> Public LB 0.04843, beat the baseline (0.04599); was #1 on public for a while.</li>
+        <li><strong>Final twist:</strong> on the private split my rank didn't move at all (public 6th &rarr; private 6th) while the top reshuffled wildly.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot">Baek Seunghan</div>
+</div>
+
+<!-- SLIDE 2 -->
+<div class="slide">
+  <h2>EDA</h2>
+  <div class="two" style="flex:0 0 auto;">
+    <div class="col" style="flex:1.15;">
+      <ul style="margin-left:20px;">
+        <li style="font-size:17px; line-height:1.4;">2500 train rows &times; 15 anonymized features (x0&ndash;x14), ~1.2% missing per column.</li>
+        <li style="font-size:17px; line-height:1.4;">The target is brutal:
+          <ul>
+            <li style="font-size:16px; line-height:1.35;">range &minus;41,008 to +69,628, but most values sit in &minus;50&hellip;+50</li>
+            <li style="font-size:16px; line-height:1.35;">skewness 13.6, kurtosis 708</li>
+            <li style="font-size:16px; line-height:1.35;">0.4% of rows have |y| &gt; 10,000</li>
+          </ul>
+        </li>
+        <li style="font-size:17px; line-height:1.4;">Weak signal: max |correlation| with the target is 0.25 (x9). Features barely correlate with each other either.</li>
+      </ul>
+    </div>
+    <div class="col plot" style="flex:1;">
+      <img src="eda_plots/01_target_distribution.png" alt="target distribution" style="max-height:260px;">
+      <p class="note">Target distribution — extreme tails</p>
+    </div>
+  </div>
+  <div class="tldr" style="margin-top:18px;">
+    <strong>Takeaway:</strong> weak signal + strong outliers &rarr; a linear model gets wrecked by a handful of extreme rows.
+  </div>
+  <div class="foot">Baek Seunghan</div>
+</div>
+
+<!-- SLIDE 3 -->
+<div class="slide">
+  <h2>Experiments &amp; what failed (and why)</h2>
+  <p style="font-size:18px; margin-bottom:14px;">I started inside the lecture toolkit (Lec 02/03/06/07) and let the failures guide me.</p>
+  <ul>
+    <li><strong>Plain Linear Regression</strong> &rarr; CV R&sup2; = &minus;0.46. One fold hit &minus;2.41 because the outliers landed there &mdash; the "sensitive to outliers" weakness from Lec 07.</li>
+    <li><strong>Polynomial + Ridge</strong> &rarr; &minus;0.84. The polynomial terms just amplified the outliers.</li>
+    <li><strong>Log-transformed target</strong> &rarr; &minus;26. The exp() inverse blew small errors up &mdash; one test prediction reached &minus;309,744.</li>
+    <li><strong>Swept Ridge / LASSO / ElasticNet / k-NN</strong> &rarr; they all converged around <strong>+0.021</strong>.</li>
+  </ul>
+  <div class="tldr">
+    <strong>Motivation that carried the project:</strong> when 3 different model families agree on the same ceiling, the limit is the <em>data</em>, not the model. So I stopped trying to be clever with the model.
+  </div>
+  <div class="foot">Baek Seunghan</div>
+</div>
+
+<!-- SLIDE 4 -->
+<div class="slide">
+  <h2>The fix: winsorize the target</h2>
+  <ul>
+    <li><strong>Insight:</strong> outliers in the training data corrupt the fit, and I can't predict them in the test set anyway. So remove their influence from <em>training only</em> &mdash; never touch the test data.</li>
+    <li><strong>Method:</strong> clip the training target to the <strong>[0.5%, 99.5%] percentiles</strong>, then fit <strong>Ridge (&alpha;=1)</strong>.</li>
+    <li><strong>Clip level = bias&ndash;variance tradeoff:</strong> too hard = lose information, too light = the outliers come back. [0.5, 99.5] was the sweet spot.</li>
+    <li><strong>Evaluation note:</strong> I trusted <strong>out-of-fold (OOF) R&sup2;</strong>, not <code>cross_val_score</code>, because one bad fold tanks the averaged version.</li>
+  </ul>
+  <div class="foot">Baek Seunghan</div>
+</div>
+
+<!-- SLIDE 5 -->
+<div class="slide">
+  <h2>Results + the big lesson</h2>
+  <p style="font-size:17px;"><strong>Final model:</strong> median impute &rarr; standardize &rarr; winsorize[0.5, 99.5] &rarr; Ridge(&alpha;=1)</p>
+  <div class="two">
+    <div class="col">
+      <p style="font-size:15px; margin:8px 0;"><strong>Calibration (linear family): OOF + ~0.018 &asymp; Public LB</strong></p>
+      <table>
+        <tr><th>Version</th><th>Approach</th><th>OOF</th><th>Public</th></tr>
+        <tr><td>v04</td><td>ElasticNet (no winsor)</td><td>+0.0140</td><td>+0.0320</td></tr>
+        <tr><td>v07</td><td>Winsor[1&ndash;99] Ridge(&alpha;10)</td><td>+0.0229</td><td>+0.0434</td></tr>
+        <tr class="hl"><td>v07b</td><td>Winsor[0.5&ndash;99.5] Ridge(&alpha;1)</td><td>+0.0327</td><td>+0.0484</td></tr>
+        <tr><td>v07d</td><td>Winsor[0.1&ndash;99.9] Ridge(&alpha;0.01)</td><td>+0.0393</td><td>+0.0190</td></tr>
+      </table>
+      <p style="font-size:15px;">v07d: OOF went UP but LB crashed &rarr; OOF can lie on this data.</p>
+    </div>
+    <div class="col">
+      <p style="font-size:15px; margin:8px 0;"><strong>Private shake-up (final)</strong></p>
+      <table>
+        <tr><th>Team</th><th>Public</th><th>Private</th><th>Move</th></tr>
+        <tr><td>Pawel (pub #1)</td><td>0.0560</td><td>0.0538</td><td>&darr; 5th</td></tr>
+        <tr><td>yifeili00</td><td>&minus;0.093</td><td>0.0625</td><td>&uarr; 3rd</td></tr>
+        <tr><td>JixiangDing</td><td>&minus;0.093</td><td>0.0624</td><td>&uarr; 4th</td></tr>
+        <tr class="hl"><td>Me (v07b)</td><td>0.0484</td><td>0.0501</td><td>0 &mdash; stayed</td></tr>
+      </table>
+      <p style="font-size:15px;">Two teams negative on public ended up 3rd/4th on private. I was the only top entry whose rank didn't move.</p>
+    </div>
+  </div>
+  <div class="tldr" style="padding:10px 18px;">
+    <strong>Lesson:</strong> when the signal is this weak, OOF lies <em>and</em> the public LB lies. The real signal is <strong>stable generalization</strong>, not a high score on one split.
+  </div>
+  <div class="foot">Baek Seunghan</div>
+</div>
+
+<!-- SLIDE 6 -->
+<div class="slide">
+  <h2>Reflection + code</h2>
+  <div class="two">
+    <div class="col">
+      <p class="big" style="margin-bottom:8px;"><strong>What worked</strong></p>
+      <ul>
+        <li>Honest EDA &rarr; understood the outlier problem first</li>
+        <li>Multiple model families to find the true ceiling</li>
+        <li>Winsorizing &mdash; fix the data, not the model</li>
+        <li>OOF R&sup2; over cross_val_score</li>
+      </ul>
+      <p class="big" style="margin:14px 0 8px;"><strong>What didn't (all documented)</strong></p>
+      <ul>
+        <li>Polynomial features, log-target transform, heavy feature engineering, too-light winsor, trees/kernel methods</li>
+      </ul>
+    </div>
+    <div class="col">
+      <p class="big" style="margin-bottom:8px;"><strong>On the dataset (constructive)</strong></p>
+      <ul>
+        <li>R&sup2; ceiling ~0.05&ndash;0.08 &rarr; 90%+ of the variance is irreducible noise. Train/test same distribution (adversarial AUC &asymp; 0.49) &mdash; not overfitting, the signal is just weak.</li>
+        <li>That's why the final ranking shuffled so much: rank was driven by variance as much as skill.</li>
+        <li><strong>Honest note:</strong> I beat the baseline on public (0.0484 vs 0.0460) but landed just under it on private (0.0501 vs 0.0526). Most teams above the private baseline jumped from the bottom of the public board &mdash; variance, not a stable model. Mine was the only top entry that didn't move on either split.</li>
+        <li>A slightly stronger signal would let the board reward modeling over luck.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="tldr" style="padding:10px 18px;">
+    <strong>Code:</strong> <a href="https://github.com/ethanbaek0112/sofia-ml-regression">https://github.com/ethanbaek0112/sofia-ml-regression</a> &mdash; <a href="https://github.com/ethanbaek0112/sofia-ml-regression/blob/main/src/phase7b_winsor_all.py"><code>src/phase7b_winsor_all.py</code></a> reproduces the final submission.
+  </div>
+  <div class="foot">Baek Seunghan</div>
+</div>
+
+</body>
+</html>

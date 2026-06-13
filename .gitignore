@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.ipynb_checkpoints/
+
+# Jupyter
+*.nbconvert.ipynb
+
+# Local artifacts
+*.log
+.cache/
+
+# Note: data/ is kept under version control because the competition dataset
+# is small and reproducibility requires exact same files.
+# But personal notes that may contain sensitive info should not be committed.
